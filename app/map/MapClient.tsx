@@ -144,8 +144,10 @@ export default function MapClient() {
           className: "",
           iconAnchor: [7, 7],
         });
+        // @ts-expect-error - Leaflet marker options
         const marker = L.marker(v.position, { icon })
-          .addTo(leafletMap.current as Parameters<typeof L.marker>[1])
+          // @ts-expect-error - Leaflet addTo
+          .addTo(leafletMap.current)
           .bindPopup(
             `<b>${v.name}</b><br/>Status: ${v.status}<br/>Delivered: ${v.ordersDelivered}`
           );
@@ -157,7 +159,10 @@ export default function MapClient() {
             weight: 2,
             opacity: 0.6,
             dashArray: "6, 6",
-          }).addTo(leafletMap.current as Parameters<typeof L.marker>[1]);
+          });
+          // @ts-expect-error - Leaflet addTo
+          line.addTo(leafletMap.current);
+          routeLinesRef.current.push(line);
           routeLinesRef.current.push(line);
         }
       });
