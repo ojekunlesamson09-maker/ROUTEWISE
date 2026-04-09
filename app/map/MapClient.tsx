@@ -1,146 +1,238 @@
-// @ts-nocheck
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Truck, Play, RotateCcw, MapPin, Zap } from "lucide-react";
+import { Truck, Play, RotateCcw } from "lucide-react";
 
-const ZONES = ["Ikeja", "Victoria Island", "Lekki", "Surulere", "Yaba", "Apapa", "Ikoyi", "Ajah", "Oshodi", "Mushin", "Agege", "Ojota", "Maryland", "Gbagada", "Isale Eko"];
+const ZONES: Record<string, [number, number]> = {
+  Ikeja: [6.5954, 3.3378],
+  "Victoria Island": [6.4281, 3.4219],
+  Lekki: [6.4698, 3.5852],
+  Surulere: [6.5, 3.3583],
+  Yaba: [6.5143, 3.3775],
+  Apapa: [6.4478, 3.3586],
+  Ikoyi: [6.4478, 3.4356],
+  Ajah: [6.4698, 3.6],
+  Oshodi: [6.5567, 3.3506],
+  Mushin: [6.5333, 3.3583],
+  Agege: [6.6167, 3.3167],
+  Ojota: [6.5833, 3.3833],
+  Maryland: [6.5667, 3.3667],
+  Gbagada: [6.55, 3.3833],
+};
+
+const ZONE_NAMES = Object.keys(ZONES);
 const COLORS = ["#f97316","#3b82f6","#10b981","#a855f7","#ec4899","#eab308"];
 
-interface Bike {
+const pick = () => ZONE_NAMES[Math.floor(Math.random() * ZONE_NAMES.length)];
+
+interface Vehicle {
   id: number;
   name: string;
   zone: string;
   dest: string;
-  col: string;
-  d: number;
-  f: number;
-  x: number;
-  y: number;
-  tx: number;
-  ty: number;
+  color: string;
+  delivered: number;
+  fuel: number;
 }
 
-function rnd(a: number, b: number): number { return Math.floor(Math.random()*(b-a+1))+a; }
-function pick(): string { return ZONES[rnd(0,ZONES.length-1)]; }
-
 export default function MapClient() {
-  const [on, setOn] = useState<boolean>(false);
-  const [vehicles, setVehicles] = useState<Bike[]>([]);
-  const [del, setDel] = useState<number>(0);
-  const [fuel, setFuel] = useState<number>(0);
+  const mapDiv = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+  const markerRefs = useRef<any[]>([]);
+  const lineRefs = useRef<any[]>([]);
+  const [sim, setSim] = useState(false);
+  const [deliveries, setDeliveries] = useState(0);
+  const [fuelSaved, setFuelSaved] = useState(0);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
 
   useEffect(() => {
-    const init: Bike[] = Array.from({length:6},(_,i):Bike => ({
-      id:i,
-      name:`Bike ${i+1}`,
-      zone:pick(),
-      dest:pick(),
-      col:COLORS[i],
-      d:0,
-      f:0,
-      x:rnd(20,80),
-      y:rnd(20,80),
-      tx:rnd(20,80),
-      ty:rnd(20,80)
-    }));
-    setVehicles(init);
-  },[]);
+    setVehicles(
+      Array.from({ length: 6 }, (_, i) => ({
+        id: i,
+        name: `Bike ${i + 1}`,
+        zone: pick(),
+        dest: pick(),
+        color: COLORS[i],
+        delivered: 0,
+        fuel: 0,
+      }))
+    );
+  }, []);
 
-  useEffect(()=>{
-    if(!on) return;
-    const iv = setInterval(() => {
-      setVehicles((prev: Bike[]): Bike[] => prev.map((b: Bike):Bike => {
-        let nx: number = b.x + (b.tx - b.x) * 0.12;
-        let ny: number = b.y + (b.ty - b.y) * 0.12;
-        if(Math.abs(nx-b.tx)<2 && Math.abs(ny-b.ty)<2){
-          return {...b, x:b.tx, y:b.ty, tx:rnd(15,85), ty:rnd(15,85), dest:pick(), d:b.d+1, f:b.f+rnd(5,15)};
+  useEffect(() => {
+    if (!mapDiv.current || mapRef.current || vehicles.length === 0) return;
+    import("leaflet").then((L) => {
+      if (!mapDiv.current || mapRef.current) return;
+      const m = L.map(mapDiv.current, {
+        center: [6.5244, 3.3792],
+        zoom: 12,
+      });
+      L.tileLayer(
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        { attribution: "© OpenStreetMap contributors" }
+      ).addTo(m);
+      mapRef.current = m;
+
+      // Zone labels
+      ZONE_NAMES.forEach((name) => {
+        const icon = L.divIcon({
+          html: `<div style="background:rgba(0,0,0,0.7);color:#9ca3af;padding:2px 5px;border-radius:4px;font-size:10px;border:1px solid #374151">${name}</div>`,
+          className: "",
+        });
+        L.marker(ZONES[name], { icon }).addTo(m);
+      });
+    });
+  }, [vehicles]);
+
+  // Draw markers and lines
+  useEffect(() => {
+    if (!mapRef.current || vehicles.length === 0) return;
+    import("leaflet").then((L) => {
+      markerRefs.current.forEach((mk) => mk?.remove());
+      lineRefs.current.forEach((ln) => ln?.remove());
+      markerRefs.current = [];
+      lineRefs.current = [];
+
+      vehicles.forEach((v) => {
+        const pos = ZONES[v.zone];
+        const dst = ZONES[v.dest];
+        if (!pos || !dst) return;
+
+        const icon = L.divIcon({
+          html: `<div style="background:${v.color};width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 0 8px ${v.color}"></div>`,
+          className: "",
+          iconAnchor: [7, 7],
+        });
+        const mk = L.marker(pos, { icon })
+          .addTo(mapRef.current)
+          .bindPopup(`<b>${v.name}</b><br/>→ ${v.dest}<br/>Delivered: ${v.delivered}`);
+        markerRefs.current.push(mk);
+
+        if (sim) {
+          const ln = L.polyline([pos, dst], {
+            color: v.color,
+            weight: 2,
+            opacity: 0.7,
+            dashArray: "6,6",
+          }).addTo(mapRef.current);
+          lineRefs.current.push(ln);
         }
-        return {...b, x:nx, y:ny};
-      }));
-      setDel((d: number): number => d+rnd(1,3));
-      setFuel((f: number): number => f+rnd(30,90));
-    }, 1100);
-    return () => clearInterval(iv);
-  }, [on]);
+      });
+    });
+  }, [vehicles, sim]);
 
-  const reset = (): void => {
-    setOn(false);
-    setDel(0);
-    setFuel(0);
+  // Simulation
+  useEffect(() => {
+    if (!sim) return;
+    const t = setInterval(() => {
+      setVehicles((prev) =>
+        prev.map((v) => ({
+          ...v,
+          zone: Math.random() > 0.7 ? v.dest : v.zone,
+          dest: Math.random() > 0.7 ? pick() : v.dest,
+          delivered: v.delivered + (Math.random() > 0.6 ? 1 : 0),
+          fuel: v.fuel + Math.floor(Math.random() * 5),
+        }))
+      );
+      setDeliveries((d) => d + Math.floor(Math.random() * 2));
+      setFuelSaved((f) => f + Math.floor(Math.random() * 80) + 20);
+    }, 1500);
+    return () => clearInterval(t);
+  }, [sim]);
+
+  const reset = () => {
+    setSim(false);
+    setDeliveries(0);
+    setFuelSaved(0);
+    setVehicles((prev) =>
+      prev.map((v) => ({ ...v, delivered: 0, fuel: 0, zone: pick(), dest: pick() }))
+    );
   };
 
   return (
-  <main className="min-h-screen bg-gray-950 text-white flex flex-col">
-    <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <Truck className="text-orange-500" size={24} />
-        <span className="text-lg font-bold">RouteWise</span>
-        <span className="ml-3 text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full">Live Map</span>
-      </div>
-      <div className="flex gap-3">
-        <button onClick={reset} className="flex items-center gap-2 border border-gray-700 hover:border-gray-500 px-4 py-2 rounded-lg text-sm transition">
-          <RotateCcw size={14} /> Reset
-        </button>
-        <button onClick={() => setOn(!on)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition ${on ? "bg-red-500 hover:bg-red-600" : "bg-orange-500 hover:bg-orange-600"}`}>
-          <Play size={14} /> {on ? "Stop" : "▶ Start Vehicles"}
-        </button>
-        <Link href="/dashboard" className="border border-gray-700 hover:border-gray-500 px-4 py-2 rounded-lg text-sm transition">← Dashboard</Link>
-      </div>
-    </header>
+    <main className="min-h-screen bg-gray-950 text-white flex flex-col">
+      <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Truck className="text-orange-500" size={24} />
+          <span className="text-lg font-bold">RouteWise</span>
+          <span className="ml-2 text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full">
+            Live Map
+          </span>
+        </div>
+        <div className="flex gap-3">
+          <button
+            onClick={reset}
+            className="flex items-center gap-2 border border-gray-700 px-4 py-2 rounded-lg text-sm"
+          >
+            <RotateCcw size={14} /> Reset
+          </button>
+          <button
+            onClick={() => setSim((s) => !s)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold ${
+              sim ? "bg-red-500" : "bg-orange-500"
+            }`}
+          >
+            <Play size={14} />
+            {sim ? "Stop" : "▶ Start Vehicles"}
+          </button>
+          <Link
+            href="/dashboard"
+            className="border border-gray-700 px-4 py-2 rounded-lg text-sm"
+          >
+            ← Dashboard
+          </Link>
+        </div>
+      </header>
 
-    <div className="flex flex-1 overflow-hidden">
-      <div className="flex-1 relative bg-gray-900 overflow-hidden">
-        <div style={{position:"absolute",inset:0,backgroundImage:"linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px)",backgroundSize:"40px 40px"}}/>
-        <div className="absolute top-6 left-8 text-5xl font-black text-white/5 select-none pointer-events-none tracking-widest">LAGOS CITY MAP</div>
-
-        {ZONES.slice(0,12).map((z:string,i:number)=>(
-          <div key={z} className="absolute text-[10px] text-gray-600 font-mono select-none pointer-events-none uppercase" style={{left:`${(i%5)*18+8}%`,top:`${Math.floor(i/5)*35+10}%`}}>{z}</div>
-        ))}
-
-        {vehicles.map((b:Bike)=>(
-          <div key={b.id} className="transition-all duration-[1000ms] ease-linear absolute z-10" style={{left:`${b.x}%`,top:`${b.y}%`,transform:"translate(-50%,-50%"}}>
-            <div style={{background:b.col,width:14,height:14,borderRadius:"50%",border:"2px solid white",boxShadow:`0 0 12px ${b.col}`}}/>
-            {on && (
-              <svg style={{position:"absolute",top:-30,left:-60,width:120,height:120,pointerEvents:"none",overflow:"visible"}}>
-                <line x1="60" y1="60" x2={`${b.tx>60?-40:160}`} y2={`${b.ty>60?-40:160}`} stroke={b.col} strokeWidth="2" strokeDasharray="4,4" opacity=".7"/>
-              </svg>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="w-72 border-l border-gray-800 bg-gray-900 p-4 flex flex-col gap-4 overflow-y-auto">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-gray-800 rounded-xl p-3 text-center"><div className="text-green-400 font-bold text-xl">{del}</div><div className="text-gray-500 text-xs">Deliveries</div></div>
-          <div className="bg-gray-800 rounded-xl p-3 text-center"><div className="text-orange-400 font-bold text-xl">₦{fuel}</div><div className="text-gray-500 text-xs">Fuel Saved</div></div>
+      <div className="flex flex-1 overflow-hidden">
+        {/* Map */}
+        <div className="flex-1">
+          <div ref={mapDiv} className="w-full h-full min-h-[calc(100vh-73px)]" />
         </div>
 
-        <div>
-          <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2"><Truck size={14} /> Fleet Tracker</h3>
+        {/* Side Panel */}
+        <div className="w-72 border-l border-gray-800 bg-gray-900 p-4 flex flex-col gap-4 overflow-y-auto">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-800 rounded-xl p-3 text-center">
+              <div className="text-green-400 font-bold text-xl">{deliveries}</div>
+              <div className="text-gray-500 text-xs">Deliveries</div>
+            </div>
+            <div className="bg-gray-800 rounded-xl p-3 text-center">
+              <div className="text-orange-400 font-bold text-xl">₦{fuelSaved}</div>
+              <div className="text-gray-500 text-xs">Fuel Saved</div>
+            </div>
+          </div>
+
+          <h3 className="text-sm font-semibold text-gray-400 flex items-center gap-2">
+            <Truck size={14} /> Fleet Tracker
+          </h3>
           <div className="space-y-2">
-            {vehicles.map((b:Bike)=>(
-              <div key={b.id} className="bg-gray-800 rounded-xl p-3 flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full flex-shrink-0" style={{backgroundColor:b.col}} />
+            {vehicles.map((v) => (
+              <div key={v.id} className="bg-gray-800 rounded-xl p-3 flex items-center gap-3">
+                <div
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: v.color, boxShadow: `0 0 6px ${v.color}` }}
+                />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium">{b.name}</div>
-                  <div className="text-xs text-gray-500 flex items-center gap-1 truncate"><MapPin size={9} /> {b.dest}</div>
+                  <div className="text-sm font-medium">{v.name}</div>
+                  <div className="text-xs text-gray-500 truncate">→ {v.dest}</div>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  <div className="text-xs text-green-400">{b.d} done</div>
-                  <div className="text-xs text-gray-500">₦{b.f}</div>
+                <div className="text-right text-xs">
+                  <div className="text-green-400">{v.delivered} done</div>
+                  <div className="text-gray-500">₦{v.fuel} saved</div>
                 </div>
               </div>
             ))}
           </div>
-        </div>
 
-        <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-3 mt-auto">
-          <div className="flex items-center gap-2 text-orange-400 text-xs font-semibold mb-2"><Zap size={12} /> A* Algorithm Active</div>
-          <p className="text-gray-400 text-xs leading-relaxed">Real-time multi-vehicle routing with dynamic traffic weights & order clustering optimization.</p>
+          <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-3">
+            <div className="text-orange-400 text-xs font-semibold mb-1">⚡ A* Algorithm Active</div>
+            <p className="text-gray-400 text-xs">
+              Real-time multi-vehicle routing with dynamic traffic weights & order clustering
+            </p>
+          </div>
         </div>
       </div>
-    </div>
-  </main>
+    </main>
   );
 }
