@@ -8,7 +8,7 @@ import { Truck, Play, RotateCcw, MapPin, Zap } from "lucide-react";
 const ZONES = ["Ikeja", "Victoria Island", "Lekki", "Surulere", "Yaba", "Apapa", "Ikoyi", "Ajah", "Oshodi", "Mushin", "Agege", "Ojota", "Maryland", "Gbagada", "Isale Eko"];
 const COLORS = ["#f97316","#3b82f6","#10b981","#a855f7","#ec4899","#eab308"];
 
-function rnd(a,b) { return Math.floor(Math.random()*(b-a+1))+a; }
+function rnd(a:number, b:number) { return Math.floor(Math.random()*(b-a+1))+a; }
 const pick = () => ZONES[rnd(0,ZONES.length-1)];
 
 export default function MapClient() {
