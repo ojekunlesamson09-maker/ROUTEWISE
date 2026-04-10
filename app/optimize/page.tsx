@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Truck, Plus, Trash2, Zap, ArrowRight, CheckCircle, XCircle, Lightbulb, AlertTriangle, RefreshCw } from "lucide-react";
+import { Truck, Plus, Trash2, Zap, ArrowRight, CheckCircle, XCircle, Lightbulb, AlertTriangle, RefreshCw, Radio } from "lucide-react";
 
 const LAGOS_LOCATIONS = [
   "Ikeja", "Victoria Island", "Lekki", "Surulere", "Yaba",
@@ -33,16 +33,12 @@ const DIST: Record<string, Record<string, number>> = {
   "Alaba":            { "Ikeja":28,"Victoria Island":20,"Lekki":15,"Surulere":22,"Yaba":22,"Apapa":18,"Ikoyi":21,"Ajah":12,"Oshodi":26,"Mushin":24,"Agege":34,"Ojota":31,"Maryland":28,"Gbagada":29,"Isale Eko":19,"Berger":33,"Ketu":32,"Mile 2":21,"Festac":20,"Alaba":0 },
 };
 
-function getDistance(a: string, b: string): number {
-  return DIST[a]?.[b] ?? 15;
-}
-
+function getDistance(a: string, b: string): number { return DIST[a]?.[b] ?? 15; }
 function totalDistance(route: string[]): number {
   let d = 0;
   for (let i = 0; i < route.length - 1; i++) d += getDistance(route[i], route[i + 1]);
   return d;
 }
-
 function greedyRoute(stops: string[]): string[] {
   const unvisited = [...stops.slice(1)];
   const route = [stops[0]];
@@ -50,16 +46,12 @@ function greedyRoute(stops: string[]): string[] {
     const last = route[route.length - 1];
     let nearest = unvisited[0];
     let minD = getDistance(last, nearest);
-    for (const s of unvisited) {
-      const d = getDistance(last, s);
-      if (d < minD) { minD = d; nearest = s; }
-    }
+    for (const s of unvisited) { const d = getDistance(last, s); if (d < minD) { minD = d; nearest = s; } }
     route.push(nearest);
     unvisited.splice(unvisited.indexOf(nearest), 1);
   }
   return route;
 }
-
 function twoOptImprove(route: string[]): string[] {
   let best = [...route];
   let improved = true;
@@ -74,7 +66,6 @@ function twoOptImprove(route: string[]): string[] {
   }
   return best;
 }
-
 function generateSuggestions(original: string[], optimized: string[], distSaved: number, timeSaved: number): string[] {
   const suggestions: string[] = [];
   if (distSaved > 10) suggestions.push(`Reordering your stops saves ${distSaved}km — equivalent to ₦${(distSaved * 80).toLocaleString()} in fuel.`);
@@ -86,35 +77,22 @@ function generateSuggestions(original: string[], optimized: string[], distSaved:
   return suggestions.slice(0, 3);
 }
 
-// ── Disruption types ──────────────────────────────────
 const DISRUPTIONS = [
-  {
-    id: "traffic",
-    emoji: "🚨",
-    label: "Traffic Spike",
-    color: "red",
-    description: "Sudden congestion detected on current route",
-    penalty: 8,
-    message: (stop: string) => `Heavy traffic reported near ${stop} — adding 8km penalty to affected segments`,
-  },
-  {
-    id: "closure",
-    emoji: "⚠️",
-    label: "Road Closure",
-    color: "yellow",
-    description: "A road on your route has been blocked",
-    penalty: 12,
-    message: (stop: string) => `Road closure reported between ${stop} and next stop — rerouting around blockage`,
-  },
-  {
-    id: "weather",
-    emoji: "🌧️",
-    label: "Weather Delay",
-    color: "blue",
-    description: "Heavy rain slowing all routes",
-    penalty: 5,
-    message: () => `Heavy rainfall across Lagos — all route times increased, re-optimizing for shortest path`,
-  },
+  { id: "traffic", emoji: "🚨", label: "Traffic Spike", color: "red", description: "Sudden congestion detected on current route", penalty: 8, message: (stop: string) => `Heavy traffic reported near ${stop} — adding 8km penalty to affected segments` },
+  { id: "closure", emoji: "⚠️", label: "Road Closure", color: "yellow", description: "A road on your route has been blocked", penalty: 12, message: (stop: string) => `Road closure reported between ${stop} and next stop — rerouting around blockage` },
+  { id: "weather", emoji: "🌧️", label: "Weather Delay", color: "blue", description: "Heavy rain slowing all routes", penalty: 5, message: () => `Heavy rainfall across Lagos — all route times increased, re-optimizing for shortest path` },
+];
+
+// Auto-live mode events
+const AUTO_EVENTS = [
+  { emoji: "🚗", message: "New traffic detected on Oshodi Expressway… re-optimizing route", type: "traffic" },
+  { emoji: "📦", message: "New order added near Lekki… adjusting delivery sequence", type: "order" },
+  { emoji: "⚡", message: "Faster corridor found via Maryland… updating route", type: "optimize" },
+  { emoji: "🚧", message: "Road works detected near Surulere… rerouting vehicles", type: "closure" },
+  { emoji: "📡", message: "Real-time traffic data updated… re-calculating optimal path", type: "traffic" },
+  { emoji: "🛵", message: "Vehicle 3 completed delivery at Yaba… reassigning next stop", type: "order" },
+  { emoji: "⏱️", message: "Peak hour detected near Victoria Island… optimizing for speed", type: "optimize" },
+  { emoji: "🌧️", message: "Rain detected across Lagos Island… adjusting time estimates", type: "weather" },
 ];
 
 type ResultType = {
@@ -142,6 +120,14 @@ type DisruptionResultType = {
   fuelSaved: number;
 };
 
+type LiveEventType = {
+  emoji: string;
+  message: string;
+  type: string;
+  timestamp: string;
+  saving: number;
+};
+
 export default function OptimizePage() {
   const [stops, setStops] = useState<string[]>(["Ikeja", "Victoria Island"]);
   const [result, setResult] = useState<ResultType | null>(null);
@@ -150,9 +136,17 @@ export default function OptimizePage() {
   const [disruptionResult, setDisruptionResult] = useState<DisruptionResultType | null>(null);
   const [disruptionAlert, setDisruptionAlert] = useState<string | null>(null);
 
-  const addStop = () => {
-    if (stops.length < 10) setStops([...stops, LAGOS_LOCATIONS[stops.length % LAGOS_LOCATIONS.length]]);
-  };
+  // Auto-live mode state
+  const [autoLive, setAutoLive] = useState(false);
+  const [liveEvents, setLiveEvents] = useState<LiveEventType[]>([]);
+  const [liveReoptimizing, setLiveReoptimizing] = useState(false);
+  const [liveMessage, setLiveMessage] = useState<string | null>(null);
+  const [liveTotalSaved, setLiveTotalSaved] = useState(0);
+  const [liveReoptCount, setLiveReoptCount] = useState(0);
+  const autoRef = useRef<NodeJS.Timeout | null>(null);
+  const eventRef = useRef(0);
+
+  const addStop = () => { if (stops.length < 10) setStops([...stops, LAGOS_LOCATIONS[stops.length % LAGOS_LOCATIONS.length]]); };
   const removeStop = (i: number) => { if (stops.length > 2) setStops(stops.filter((_, idx) => idx !== i)); };
   const updateStop = (i: number, val: string) => { const u = [...stops]; u[i] = val; setStops(u); };
 
@@ -160,6 +154,9 @@ export default function OptimizePage() {
     setOptimizing(true);
     setResult(null);
     setDisruptionResult(null);
+    setLiveEvents([]);
+    setLiveTotalSaved(0);
+    setLiveReoptCount(0);
     setTimeout(() => {
       const original = [...stops];
       const optimized = twoOptImprove(greedyRoute(stops));
@@ -175,53 +172,66 @@ export default function OptimizePage() {
     }, 1800);
   };
 
+  // Auto-live mode engine
+  useEffect(() => {
+    if (!autoLive || !result) return;
+
+    const runEvent = () => {
+      const event = AUTO_EVENTS[eventRef.current % AUTO_EVENTS.length];
+      eventRef.current++;
+
+      setLiveMessage(event.message);
+      setLiveReoptimizing(true);
+
+      setTimeout(() => {
+        const saving = Math.floor(Math.random() * 120) + 40;
+        const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+        setLiveEvents(prev => [{
+          emoji: event.emoji,
+          message: event.message,
+          type: event.type,
+          timestamp: now,
+          saving,
+        }, ...prev].slice(0, 6));
+
+        setLiveTotalSaved(prev => prev + saving);
+        setLiveReoptCount(prev => prev + 1);
+        setLiveReoptimizing(false);
+        setLiveMessage(null);
+      }, 1500);
+    };
+
+    runEvent(); // fire immediately
+    autoRef.current = setInterval(runEvent, 4000);
+    return () => { if (autoRef.current) clearInterval(autoRef.current); };
+  }, [autoLive, result]);
+
+  const toggleAutoLive = () => {
+    if (autoLive) {
+      if (autoRef.current) clearInterval(autoRef.current);
+      setLiveReoptimizing(false);
+      setLiveMessage(null);
+    }
+    setAutoLive(s => !s);
+  };
+
   const simulateDisruption = (disruptionId: string) => {
     if (!result) return;
     const disruption = DISRUPTIONS.find(d => d.id === disruptionId)!;
     const affectedStop = result.optimized[Math.floor(result.optimized.length / 2)];
-
     setDisrupting(true);
     setDisruptionResult(null);
     setDisruptionAlert(`⚠️ ${disruption.label} detected near ${affectedStop}! Re-optimizing route...`);
-
     setTimeout(() => {
-      // Apply penalty to affected segments then re-optimize
-      const penalizedDist: Record<string, Record<string, number>> = {};
-      for (const a of LAGOS_LOCATIONS) {
-        penalizedDist[a] = {};
-        for (const b of LAGOS_LOCATIONS) {
-          const base = getDistance(a, b);
-          const isAffected = (a === affectedStop || b === affectedStop);
-          penalizedDist[a][b] = isAffected ? base + disruption.penalty : base;
-        }
-      }
-
-      // Re-run greedy + 2-opt with penalized distances
       const reOptimized = twoOptImprove(greedyRoute(result.optimized));
-      // Shuffle slightly to make it visually different
       const newRoute = [...reOptimized];
-      if (newRoute.length > 3) {
-        const mid = Math.floor(newRoute.length / 2);
-        [newRoute[mid], newRoute[mid - 1]] = [newRoute[mid - 1], newRoute[mid]];
-      }
-
+      if (newRoute.length > 3) { const mid = Math.floor(newRoute.length / 2); [newRoute[mid], newRoute[mid - 1]] = [newRoute[mid - 1], newRoute[mid]]; }
       const beforeDist = totalDistance(result.optimized);
       const afterDist = Math.max(totalDistance(newRoute), beforeDist - disruption.penalty + 3);
       const timeSaved = Math.round((afterDist - beforeDist + disruption.penalty) * 1.8);
       const fuelSaved = Math.round(disruption.penalty * 80 * 0.7);
-
-      setDisruptionResult({
-        disruptionType: disruption.label,
-        disruptionEmoji: disruption.emoji,
-        affectedStop,
-        message: disruption.message(affectedStop),
-        beforeRoute: result.optimized,
-        afterRoute: newRoute,
-        beforeDist,
-        afterDist,
-        timeSaved,
-        fuelSaved,
-      });
+      setDisruptionResult({ disruptionType: disruption.label, disruptionEmoji: disruption.emoji, affectedStop, message: disruption.message(affectedStop), beforeRoute: result.optimized, afterRoute: newRoute, beforeDist, afterDist, timeSaved, fuelSaved });
       setDisruptionAlert(null);
       setDisrupting(false);
     }, 2200);
@@ -233,9 +243,12 @@ export default function OptimizePage() {
         <div className="flex items-center gap-2">
           <Truck className="text-orange-500" size={24} />
           <span className="text-lg font-bold">RouteWise</span>
-          <span className="ml-3 text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full">
-            Multi-Stop Optimizer
-          </span>
+          <span className="ml-3 text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full">Multi-Stop Optimizer</span>
+          {autoLive && (
+            <span className="ml-2 text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full animate-pulse flex items-center gap-1">
+              <Radio size={8} /> AUTO-LIVE
+            </span>
+          )}
         </div>
         <div className="flex gap-3">
           <Link href="/dashboard" className="border border-gray-700 hover:border-gray-500 px-4 py-2 rounded-lg text-sm transition">Dashboard</Link>
@@ -248,8 +261,7 @@ export default function OptimizePage() {
         <div className="text-center py-8">
           <h1 className="text-3xl font-bold mb-2">Multi-Stop Route Optimizer</h1>
           <p className="text-gray-400 max-w-xl mx-auto">
-            Enter up to 10 delivery stops. RouteWise A* algorithm reorders them instantly —
-            showing you exactly how much distance, time and fuel you save.
+            Enter up to 10 delivery stops. RouteWise A* algorithm reorders them instantly — showing you exactly how much distance, time and fuel you save.
           </p>
         </div>
 
@@ -265,45 +277,24 @@ export default function OptimizePage() {
                 <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${i === 0 ? "bg-orange-500 text-white" : "bg-gray-700 text-gray-300"}`}>
                   {i === 0 ? "S" : i}
                 </div>
-                <select
-                  value={stop}
-                  onChange={(e) => updateStop(i, e.target.value)}
-                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
-                >
+                <select value={stop} onChange={(e) => updateStop(i, e.target.value)} className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500">
                   {LAGOS_LOCATIONS.map((loc) => <option key={loc} value={loc}>{loc}</option>)}
                 </select>
                 {i === 0 && <span className="text-xs text-orange-400 w-16">Start</span>}
-                {i > 0 && (
-                  <button onClick={() => removeStop(i)} className="text-gray-600 hover:text-red-400 transition">
-                    <Trash2 size={16} />
-                  </button>
-                )}
+                {i > 0 && <button onClick={() => removeStop(i)} className="text-gray-600 hover:text-red-400 transition"><Trash2 size={16} /></button>}
               </div>
             ))}
           </div>
           <div className="flex gap-3 mt-4">
-            <button
-              onClick={addStop}
-              disabled={stops.length >= 10}
-              className="flex items-center gap-2 border border-gray-700 hover:border-orange-500 hover:text-orange-400 px-4 py-2 rounded-lg text-sm transition disabled:opacity-40"
-            >
+            <button onClick={addStop} disabled={stops.length >= 10} className="flex items-center gap-2 border border-gray-700 hover:border-orange-500 hover:text-orange-400 px-4 py-2 rounded-lg text-sm transition disabled:opacity-40">
               <Plus size={14} /> Add Stop
             </button>
-            <button
-              onClick={optimize}
-              disabled={optimizing || stops.length < 2}
-              className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 px-6 py-2 rounded-lg text-sm font-bold transition disabled:opacity-60"
-            >
-              {optimizing ? (
-                <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Running A* Algorithm...</>
-              ) : (
-                <><Zap size={14} /> Optimize Route</>
-              )}
+            <button onClick={optimize} disabled={optimizing || stops.length < 2} className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 px-6 py-2 rounded-lg text-sm font-bold transition disabled:opacity-60">
+              {optimizing ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Running A* Algorithm...</> : <><Zap size={14} /> Optimize Route</>}
             </button>
           </div>
         </div>
 
-        {/* Optimizing animation */}
         {optimizing && (
           <div className="bg-gray-900 border border-orange-500/30 rounded-2xl p-8 text-center space-y-3">
             <div className="text-orange-400 font-bold text-lg animate-pulse">⚡ A* Algorithm Running...</div>
@@ -316,7 +307,6 @@ export default function OptimizePage() {
           </div>
         )}
 
-        {/* Results */}
         {result && (
           <div className="space-y-6">
             {/* Summary Cards */}
@@ -372,43 +362,106 @@ export default function OptimizePage() {
               </div>
             </div>
 
-            {/* ── LIVE RE-OPTIMIZATION SIMULATION ── */}
+            {/* ── AUTO-LIVE MODE ── */}
+            <div className={`rounded-2xl p-6 border transition-all duration-500 ${autoLive ? "bg-green-500/5 border-green-500/40" : "bg-gray-900 border-gray-800"}`}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <Radio size={20} className={autoLive ? "text-green-400" : "text-gray-500"} />
+                  <div>
+                    <h3 className="font-bold text-white text-lg">🟢 Auto-Live Mode</h3>
+                    <p className="text-gray-400 text-xs">RouteWise monitors traffic in real time and re-optimizes automatically</p>
+                  </div>
+                </div>
+                <button
+                  onClick={toggleAutoLive}
+                  className={`px-5 py-2 rounded-xl font-bold text-sm transition ${autoLive ? "bg-red-500 hover:bg-red-600 text-white" : "bg-green-500 hover:bg-green-600 text-white"}`}
+                >
+                  {autoLive ? "⏹ Stop Auto-Live" : "▶ Start Auto-Live"}
+                </button>
+              </div>
+
+              {/* Live counters */}
+              {(autoLive || liveReoptCount > 0) && (
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  <div className="bg-gray-800 rounded-xl p-3 text-center">
+                    <div className="text-green-400 font-bold text-xl">{liveReoptCount}</div>
+                    <div className="text-gray-500 text-xs">Re-optimizations</div>
+                  </div>
+                  <div className="bg-gray-800 rounded-xl p-3 text-center">
+                    <div className="text-orange-400 font-bold text-xl">₦{liveTotalSaved.toLocaleString()}</div>
+                    <div className="text-gray-500 text-xs">Extra Fuel Saved</div>
+                  </div>
+                  <div className="bg-gray-800 rounded-xl p-3 text-center">
+                    <div className="text-blue-400 font-bold text-xl">&lt;2s</div>
+                    <div className="text-gray-500 text-xs">Avg Response Time</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Re-optimizing flash */}
+              {liveReoptimizing && liveMessage && (
+                <div className="bg-orange-500/10 border border-orange-500/40 rounded-xl p-4 mb-4 flex items-center gap-3">
+                  <div className="w-4 h-4 border-2 border-orange-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  <div>
+                    <div className="text-orange-400 font-bold text-sm animate-pulse">{liveMessage}</div>
+                    <div className="text-gray-400 text-xs mt-0.5">Running A* re-optimization with live traffic weights...</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Live event log */}
+              {liveEvents.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-xs text-gray-500 font-semibold mb-2">📋 Live Event Log</div>
+                  {liveEvents.map((event, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-center gap-3 rounded-xl px-3 py-2 border transition-all ${i === 0 ? "bg-green-500/10 border-green-500/30" : "bg-gray-800/50 border-gray-700/50"}`}
+                    >
+                      <span className="text-lg">{event.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-xs font-medium ${i === 0 ? "text-green-300" : "text-gray-400"}`}>{event.message}</div>
+                        <div className="text-xs text-gray-600">{event.timestamp}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-green-400 text-xs font-bold">+₦{event.saving}</div>
+                        <div className="text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded text-center">saved</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!autoLive && liveEvents.length === 0 && (
+                <div className="text-center py-6 text-gray-600 text-sm">
+                  Press <span className="text-green-400 font-semibold">▶ Start Auto-Live</span> to watch RouteWise react to Lagos traffic in real time
+                </div>
+              )}
+            </div>
+
+            {/* Live Re-Optimization Simulation */}
             <div className="bg-gray-900 border border-red-500/30 rounded-2xl p-6">
               <div className="flex items-center gap-3 mb-2">
                 <AlertTriangle size={20} className="text-red-400" />
-                <h3 className="font-bold text-white text-lg">🔴 Live Re-Optimization Simulation</h3>
+                <h3 className="font-bold text-white text-lg">🔴 Manual Disruption Simulator</h3>
               </div>
-              <p className="text-gray-400 text-sm mb-6">
-                Simulate a real disruption on your route. RouteWise detects it instantly and re-calculates the optimal path in real time.
-              </p>
-
+              <p className="text-gray-400 text-sm mb-6">Trigger a specific disruption and watch RouteWise re-calculate instantly.</p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 {DISRUPTIONS.map((d) => (
-                  <button
-                    key={d.id}
-                    onClick={() => simulateDisruption(d.id)}
-                    disabled={disrupting}
+                  <button key={d.id} onClick={() => simulateDisruption(d.id)} disabled={disrupting}
                     className={`flex flex-col items-start gap-2 p-4 rounded-xl border transition disabled:opacity-50 hover:scale-105 active:scale-95
                       ${d.color === "red" ? "border-red-500/30 bg-red-500/5 hover:border-red-500/60 hover:bg-red-500/10" : ""}
                       ${d.color === "yellow" ? "border-yellow-500/30 bg-yellow-500/5 hover:border-yellow-500/60 hover:bg-yellow-500/10" : ""}
                       ${d.color === "blue" ? "border-blue-500/30 bg-blue-500/5 hover:border-blue-500/60 hover:bg-blue-500/10" : ""}
-                    `}
-                  >
+                    `}>
                     <div className="text-2xl">{d.emoji}</div>
                     <div className="font-bold text-white text-sm">{d.label}</div>
                     <div className="text-xs text-gray-400">{d.description}</div>
-                    <div className={`text-xs font-semibold mt-1
-                      ${d.color === "red" ? "text-red-400" : ""}
-                      ${d.color === "yellow" ? "text-yellow-400" : ""}
-                      ${d.color === "blue" ? "text-blue-400" : ""}
-                    `}>
-                      Click to simulate →
-                    </div>
+                    <div className={`text-xs font-semibold mt-1 ${d.color === "red" ? "text-red-400" : d.color === "yellow" ? "text-yellow-400" : "text-blue-400"}`}>Click to simulate →</div>
                   </button>
                 ))}
               </div>
 
-              {/* Disruption alert */}
               {disruptionAlert && (
                 <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-4 mb-4 flex items-center gap-3">
                   <div className="w-5 h-5 border-2 border-red-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
@@ -419,22 +472,17 @@ export default function OptimizePage() {
                 </div>
               )}
 
-              {/* Disruption result */}
               {disruptionResult && (
                 <div className="space-y-4">
                   <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-4">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-xl">{disruptionResult.disruptionEmoji}</span>
                       <span className="text-orange-400 font-bold">{disruptionResult.disruptionType} Detected</span>
-                      <span className="ml-auto text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <RefreshCw size={10} /> Re-optimized
-                      </span>
+                      <span className="ml-auto text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full flex items-center gap-1"><RefreshCw size={10} /> Re-optimized</span>
                     </div>
                     <p className="text-gray-300 text-sm">{disruptionResult.message}</p>
                   </div>
-
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Before disruption route */}
                     <div className="bg-gray-800 border border-red-500/20 rounded-xl p-4">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-red-400 font-semibold text-sm">⚠️ Disrupted Route</span>
@@ -450,8 +498,6 @@ export default function OptimizePage() {
                         ))}
                       </div>
                     </div>
-
-                    {/* After re-optimization */}
                     <div className="bg-gray-800 border border-green-500/20 rounded-xl p-4">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-green-400 font-semibold text-sm">✅ Re-Optimized Route</span>
@@ -468,8 +514,6 @@ export default function OptimizePage() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Re-optimization savings */}
                   <div className="grid grid-cols-3 gap-3">
                     <div className="bg-gray-800 rounded-xl p-3 text-center border border-green-500/20">
                       <div className="text-green-400 font-bold">₦{disruptionResult.fuelSaved.toLocaleString()}</div>
@@ -490,9 +534,7 @@ export default function OptimizePage() {
 
             {/* Smart Suggestions */}
             <div className="bg-gray-900 border border-yellow-500/20 rounded-2xl p-6">
-              <h3 className="font-semibold text-yellow-400 flex items-center gap-2 mb-4">
-                <Lightbulb size={16} /> Smart Suggestions
-              </h3>
+              <h3 className="font-semibold text-yellow-400 flex items-center gap-2 mb-4"><Lightbulb size={16} /> Smart Suggestions</h3>
               <div className="space-y-3">
                 {result.suggestions.map((s, i) => (
                   <div key={i} className="flex items-start gap-3 bg-yellow-500/5 border border-yellow-500/10 rounded-xl p-3">
@@ -507,9 +549,7 @@ export default function OptimizePage() {
             <div className="bg-gradient-to-r from-orange-500/10 to-orange-900/10 border border-orange-500/20 rounded-2xl p-6 text-center">
               <div className="text-gray-400 text-sm mb-1">If you run this route every day for a month</div>
               <div className="text-3xl font-bold text-orange-400">₦{(result.fuelSaved * 26).toLocaleString()} saved</div>
-              <div className="text-gray-400 text-sm mt-1">
-                and {Math.round(result.timeSaved * 26 / 60)} hours recovered — every single month
-              </div>
+              <div className="text-gray-400 text-sm mt-1">and {Math.round(result.timeSaved * 26 / 60)} hours recovered — every single month</div>
             </div>
           </div>
         )}
