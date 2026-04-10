@@ -1,7 +1,23 @@
+"use client";
+import { useState } from "react";
 import Link from "next/link";
-import { Truck, MapPin, TrendingDown, Zap, Route, Play, DollarSign } from "lucide-react";
+import { Truck, MapPin, TrendingDown, Zap, Route, Play, DollarSign, Calculator } from "lucide-react";
 
 export default function Home() {
+  const [riders, setRiders] = useState(10);
+  const [hours, setHours] = useState(8);
+  const [days, setDays] = useState(26);
+
+  const fuelPerRiderPerHour = 4200;
+  const savingsPct = 0.20;
+  const timeSavedPerHour = 0.35;
+
+  const monthlyFuelSpend = riders * hours * days * fuelPerRiderPerHour;
+  const monthlyFuelSaved = Math.round(monthlyFuelSpend * savingsPct);
+  const monthlyTimeSaved = Math.round(riders * hours * days * timeSavedPerHour);
+  const annualSaved = monthlyFuelSaved * 12;
+  const efficiencyGain = 35;
+
   return (
     <main className="min-h-screen bg-gray-950 text-white">
       {/* Header */}
@@ -13,6 +29,9 @@ export default function Home() {
         <div className="flex items-center gap-4">
           <Link href="/optimize" className="text-sm text-orange-400 hover:text-orange-300 transition">
             Route Optimizer
+          </Link>
+          <Link href="/algorithm" className="text-sm text-orange-400 hover:text-orange-300 transition">
+            Algorithm Playback
           </Link>
           <Link href="/dashboard" className="text-sm text-gray-400 hover:text-white transition">
             Dashboard
@@ -85,27 +104,132 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ── FEATURE 3: Cost + Time Savings Calculator ── */}
+      <section className="max-w-4xl mx-auto px-6 pb-16">
+        <div className="bg-gray-900 border border-orange-500/30 rounded-2xl p-8">
+          <div className="flex items-center gap-3 mb-2">
+            <Calculator className="text-orange-400" size={24} />
+            <h2 className="text-2xl font-bold">💰 Calculate Your Savings</h2>
+          </div>
+          <p className="text-gray-400 text-sm mb-8">
+            Enter your fleet details and see exactly how much RouteWise saves you — in naira, in hours, every month.
+          </p>
+
+          {/* Sliders */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+            <div>
+              <label className="text-sm text-gray-400 mb-2 block">
+                Number of Riders: <span className="text-orange-400 font-bold text-lg">{riders}</span>
+              </label>
+              <input
+                type="range" min={1} max={200} value={riders}
+                onChange={e => setRiders(Number(e.target.value))}
+                className="w-full accent-orange-500"
+              />
+              <div className="flex justify-between text-xs text-gray-600 mt-1">
+                <span>1</span><span>200</span>
+              </div>
+            </div>
+            <div>
+              <label className="text-sm text-gray-400 mb-2 block">
+                Hours Per Day: <span className="text-orange-400 font-bold text-lg">{hours}h</span>
+              </label>
+              <input
+                type="range" min={1} max={16} value={hours}
+                onChange={e => setHours(Number(e.target.value))}
+                className="w-full accent-orange-500"
+              />
+              <div className="flex justify-between text-xs text-gray-600 mt-1">
+                <span>1h</span><span>16h</span>
+              </div>
+            </div>
+            <div>
+              <label className="text-sm text-gray-400 mb-2 block">
+                Working Days/Month: <span className="text-orange-400 font-bold text-lg">{days}</span>
+              </label>
+              <input
+                type="range" min={1} max={31} value={days}
+                onChange={e => setDays(Number(e.target.value))}
+                className="w-full accent-orange-500"
+              />
+              <div className="flex justify-between text-xs text-gray-600 mt-1">
+                <span>1</span><span>31</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Results */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-gray-800 rounded-2xl p-4 text-center border border-green-500/20">
+              <div className="text-2xl font-extrabold text-green-400">
+                ₦{monthlyFuelSaved.toLocaleString()}
+              </div>
+              <div className="text-gray-400 text-xs mt-1">Fuel Saved / Month</div>
+            </div>
+            <div className="bg-gray-800 rounded-2xl p-4 text-center border border-blue-500/20">
+              <div className="text-2xl font-extrabold text-blue-400">
+                {monthlyTimeSaved.toLocaleString()}h
+              </div>
+              <div className="text-gray-400 text-xs mt-1">Hours Saved / Month</div>
+            </div>
+            <div className="bg-gray-800 rounded-2xl p-4 text-center border border-purple-500/20">
+              <div className="text-2xl font-extrabold text-purple-400">
+                ₦{annualSaved.toLocaleString()}
+              </div>
+              <div className="text-gray-400 text-xs mt-1">Annual Savings</div>
+            </div>
+            <div className="bg-gray-800 rounded-2xl p-4 text-center border border-orange-500/20">
+              <div className="text-2xl font-extrabold text-orange-400">
+                {efficiencyGain}%
+              </div>
+              <div className="text-gray-400 text-xs mt-1">Efficiency Gain</div>
+            </div>
+          </div>
+
+          {/* Summary sentence */}
+          <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4 text-center">
+            <p className="text-white font-semibold">
+              With <span className="text-orange-400">{riders} riders</span> working{" "}
+              <span className="text-orange-400">{hours}h/day</span> for{" "}
+              <span className="text-orange-400">{days} days</span> — RouteWise saves you{" "}
+              <span className="text-green-400 font-bold">₦{monthlyFuelSaved.toLocaleString()}</span> in fuel and{" "}
+              <span className="text-blue-400 font-bold">{monthlyTimeSaved.toLocaleString()} hours</span> every single month.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Features Section */}
       <section className="max-w-4xl mx-auto px-6 pb-16">
         <h2 className="text-2xl font-bold text-center mb-10">
           Everything You Need to <span className="text-orange-500">Win the Last Mile</span>
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-orange-500/50 transition">
             <Route className="text-orange-500 mb-3" size={28} />
             <h3 className="font-bold text-white mb-2">Multi-Stop Optimizer</h3>
             <p className="text-gray-400 text-sm mb-4">
-              Enter up to 10 stops. RouteWise reorders them using A* + 2-opt improvement — showing before vs after with exact km and ₦ saved.
+              Enter up to 10 stops. Reordered using A* + 2-opt — before vs after with exact km and ₦ saved.
             </p>
             <Link href="/optimize" className="text-orange-400 text-sm font-semibold hover:text-orange-300 transition">
               Try it now →
             </Link>
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-orange-500/50 transition">
+            <Zap className="text-orange-500 mb-3" size={28} />
+            <h3 className="font-bold text-white mb-2">Algorithm Playback</h3>
+            <p className="text-gray-400 text-sm mb-4">
+              Watch A* calculate the optimal route step by step — nodes lighting up, f(n) scores live, final path forming.
+            </p>
+            <Link href="/algorithm" className="text-orange-400 text-sm font-semibold hover:text-orange-300 transition">
+              Watch it work →
+            </Link>
+          </div>
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-orange-500/50 transition">
             <Play className="text-orange-500 mb-3" size={28} />
             <h3 className="font-bold text-white mb-2">Live Fleet Tracking</h3>
             <p className="text-gray-400 text-sm mb-4">
-              Watch 6 bikes navigate real Lagos streets in real time. Every route is dynamically optimized every 2 seconds as new orders arrive.
+              Watch 6 bikes navigate real Lagos streets in real time. Dynamically optimized every 2 seconds.
             </p>
             <Link href="/map" className="text-orange-400 text-sm font-semibold hover:text-orange-300 transition">
               Open live map →
@@ -115,7 +239,7 @@ export default function Home() {
             <DollarSign className="text-orange-500 mb-3" size={28} />
             <h3 className="font-bold text-white mb-2">Real-Time Savings</h3>
             <p className="text-gray-400 text-sm mb-4">
-              Live dashboard tracks fuel saved, time saved, and orders delivered — with A* vs Greedy comparison charts updating every 2 seconds.
+              Live dashboard tracks fuel saved, time saved, and orders delivered — A* vs Greedy charts live.
             </p>
             <Link href="/dashboard" className="text-orange-400 text-sm font-semibold hover:text-orange-300 transition">
               View dashboard →
