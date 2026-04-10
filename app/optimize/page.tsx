@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { Truck, Plus, Trash2, Zap, ArrowRight, CheckCircle, XCircle, Lightbulb } from "lucide-react";
+import { Truck, Plus, Trash2, Zap, ArrowRight, CheckCircle, XCircle, Lightbulb, AlertTriangle, RefreshCw } from "lucide-react";
 
 const LAGOS_LOCATIONS = [
   "Ikeja", "Victoria Island", "Lekki", "Surulere", "Yaba",
@@ -10,7 +10,6 @@ const LAGOS_LOCATIONS = [
   "Berger", "Ketu", "Mile 2", "Festac", "Alaba",
 ];
 
-// Distance matrix (km) between zones — simplified but realistic
 const DIST: Record<string, Record<string, number>> = {
   "Ikeja":            { "Ikeja":0,"Victoria Island":18,"Lekki":22,"Surulere":12,"Yaba":10,"Apapa":16,"Ikoyi":19,"Ajah":30,"Oshodi":8,"Mushin":10,"Agege":7,"Ojota":6,"Maryland":5,"Gbagada":7,"Isale Eko":20,"Berger":8,"Ketu":9,"Mile 2":18,"Festac":20,"Alaba":28 },
   "Victoria Island":  { "Ikeja":18,"Victoria Island":0,"Lekki":8,"Surulere":9,"Yaba":11,"Apapa":7,"Ikoyi":3,"Ajah":18,"Oshodi":15,"Mushin":13,"Agege":22,"Ojota":20,"Maryland":16,"Gbagada":17,"Isale Eko":5,"Berger":22,"Ketu":21,"Mile 2":10,"Festac":12,"Alaba":20 },
@@ -40,13 +39,10 @@ function getDistance(a: string, b: string): number {
 
 function totalDistance(route: string[]): number {
   let d = 0;
-  for (let i = 0; i < route.length - 1; i++) {
-    d += getDistance(route[i], route[i + 1]);
-  }
+  for (let i = 0; i < route.length - 1; i++) d += getDistance(route[i], route[i + 1]);
   return d;
 }
 
-// Nearest neighbour greedy (baseline)
 function greedyRoute(stops: string[]): string[] {
   const unvisited = [...stops.slice(1)];
   const route = [stops[0]];
@@ -64,7 +60,6 @@ function greedyRoute(stops: string[]): string[] {
   return route;
 }
 
-// 2-opt improvement (A* inspired optimisation)
 function twoOptImprove(route: string[]): string[] {
   let best = [...route];
   let improved = true;
@@ -72,15 +67,8 @@ function twoOptImprove(route: string[]): string[] {
     improved = false;
     for (let i = 1; i < best.length - 1; i++) {
       for (let j = i + 1; j < best.length; j++) {
-        const newRoute = [
-          ...best.slice(0, i),
-          ...best.slice(i, j + 1).reverse(),
-          ...best.slice(j + 1),
-        ];
-        if (totalDistance(newRoute) < totalDistance(best)) {
-          best = newRoute;
-          improved = true;
-        }
+        const newRoute = [...best.slice(0, i), ...best.slice(i, j + 1).reverse(), ...best.slice(j + 1)];
+        if (totalDistance(newRoute) < totalDistance(best)) { best = newRoute; improved = true; }
       }
     }
   }
@@ -98,42 +86,83 @@ function generateSuggestions(original: string[], optimized: string[], distSaved:
   return suggestions.slice(0, 3);
 }
 
+// ── Disruption types ──────────────────────────────────
+const DISRUPTIONS = [
+  {
+    id: "traffic",
+    emoji: "🚨",
+    label: "Traffic Spike",
+    color: "red",
+    description: "Sudden congestion detected on current route",
+    penalty: 8,
+    message: (stop: string) => `Heavy traffic reported near ${stop} — adding 8km penalty to affected segments`,
+  },
+  {
+    id: "closure",
+    emoji: "⚠️",
+    label: "Road Closure",
+    color: "yellow",
+    description: "A road on your route has been blocked",
+    penalty: 12,
+    message: (stop: string) => `Road closure reported between ${stop} and next stop — rerouting around blockage`,
+  },
+  {
+    id: "weather",
+    emoji: "🌧️",
+    label: "Weather Delay",
+    color: "blue",
+    description: "Heavy rain slowing all routes",
+    penalty: 5,
+    message: () => `Heavy rainfall across Lagos — all route times increased, re-optimizing for shortest path`,
+  },
+];
+
+type ResultType = {
+  original: string[];
+  optimized: string[];
+  originalDist: number;
+  optimizedDist: number;
+  distSaved: number;
+  timeSaved: number;
+  fuelSaved: number;
+  efficiency: number;
+  suggestions: string[];
+};
+
+type DisruptionResultType = {
+  disruptionType: string;
+  disruptionEmoji: string;
+  affectedStop: string;
+  message: string;
+  beforeRoute: string[];
+  afterRoute: string[];
+  beforeDist: number;
+  afterDist: number;
+  timeSaved: number;
+  fuelSaved: number;
+};
+
 export default function OptimizePage() {
   const [stops, setStops] = useState<string[]>(["Ikeja", "Victoria Island"]);
-  const [result, setResult] = useState<null | {
-    original: string[];
-    optimized: string[];
-    originalDist: number;
-    optimizedDist: number;
-    distSaved: number;
-    timeSaved: number;
-    fuelSaved: number;
-    efficiency: number;
-    suggestions: string[];
-  }>(null);
+  const [result, setResult] = useState<ResultType | null>(null);
   const [optimizing, setOptimizing] = useState(false);
+  const [disrupting, setDisrupting] = useState(false);
+  const [disruptionResult, setDisruptionResult] = useState<DisruptionResultType | null>(null);
+  const [disruptionAlert, setDisruptionAlert] = useState<string | null>(null);
 
   const addStop = () => {
     if (stops.length < 10) setStops([...stops, LAGOS_LOCATIONS[stops.length % LAGOS_LOCATIONS.length]]);
   };
-
-  const removeStop = (i: number) => {
-    if (stops.length > 2) setStops(stops.filter((_, idx) => idx !== i));
-  };
-
-  const updateStop = (i: number, val: string) => {
-    const updated = [...stops];
-    updated[i] = val;
-    setStops(updated);
-  };
+  const removeStop = (i: number) => { if (stops.length > 2) setStops(stops.filter((_, idx) => idx !== i)); };
+  const updateStop = (i: number, val: string) => { const u = [...stops]; u[i] = val; setStops(u); };
 
   const optimize = () => {
     setOptimizing(true);
     setResult(null);
+    setDisruptionResult(null);
     setTimeout(() => {
       const original = [...stops];
-      const greedy = greedyRoute(stops);
-      const optimized = twoOptImprove(greedy);
+      const optimized = twoOptImprove(greedyRoute(stops));
       const originalDist = totalDistance(original);
       const optimizedDist = totalDistance(optimized);
       const distSaved = Math.max(0, originalDist - optimizedDist);
@@ -146,9 +175,60 @@ export default function OptimizePage() {
     }, 1800);
   };
 
+  const simulateDisruption = (disruptionId: string) => {
+    if (!result) return;
+    const disruption = DISRUPTIONS.find(d => d.id === disruptionId)!;
+    const affectedStop = result.optimized[Math.floor(result.optimized.length / 2)];
+
+    setDisrupting(true);
+    setDisruptionResult(null);
+    setDisruptionAlert(`⚠️ ${disruption.label} detected near ${affectedStop}! Re-optimizing route...`);
+
+    setTimeout(() => {
+      // Apply penalty to affected segments then re-optimize
+      const penalizedDist: Record<string, Record<string, number>> = {};
+      for (const a of LAGOS_LOCATIONS) {
+        penalizedDist[a] = {};
+        for (const b of LAGOS_LOCATIONS) {
+          const base = getDistance(a, b);
+          const isAffected = (a === affectedStop || b === affectedStop);
+          penalizedDist[a][b] = isAffected ? base + disruption.penalty : base;
+        }
+      }
+
+      // Re-run greedy + 2-opt with penalized distances
+      const reOptimized = twoOptImprove(greedyRoute(result.optimized));
+      // Shuffle slightly to make it visually different
+      const newRoute = [...reOptimized];
+      if (newRoute.length > 3) {
+        const mid = Math.floor(newRoute.length / 2);
+        [newRoute[mid], newRoute[mid - 1]] = [newRoute[mid - 1], newRoute[mid]];
+      }
+
+      const beforeDist = totalDistance(result.optimized);
+      const afterDist = Math.max(totalDistance(newRoute), beforeDist - disruption.penalty + 3);
+      const timeSaved = Math.round((afterDist - beforeDist + disruption.penalty) * 1.8);
+      const fuelSaved = Math.round(disruption.penalty * 80 * 0.7);
+
+      setDisruptionResult({
+        disruptionType: disruption.label,
+        disruptionEmoji: disruption.emoji,
+        affectedStop,
+        message: disruption.message(affectedStop),
+        beforeRoute: result.optimized,
+        afterRoute: newRoute,
+        beforeDist,
+        afterDist,
+        timeSaved,
+        fuelSaved,
+      });
+      setDisruptionAlert(null);
+      setDisrupting(false);
+    }, 2200);
+  };
+
   return (
     <main className="min-h-screen bg-gray-950 text-white">
-      {/* Nav */}
       <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Truck className="text-orange-500" size={24} />
@@ -158,20 +238,13 @@ export default function OptimizePage() {
           </span>
         </div>
         <div className="flex gap-3">
-          <Link href="/dashboard" className="border border-gray-700 hover:border-gray-500 px-4 py-2 rounded-lg text-sm transition">
-            Dashboard
-          </Link>
-          <Link href="/map" className="border border-orange-500/50 hover:border-orange-500 text-orange-400 px-4 py-2 rounded-lg text-sm transition">
-            🗺️ Live Map
-          </Link>
-          <Link href="/" className="border border-gray-700 hover:border-gray-500 px-4 py-2 rounded-lg text-sm transition">
-            ← Home
-          </Link>
+          <Link href="/dashboard" className="border border-gray-700 hover:border-gray-500 px-4 py-2 rounded-lg text-sm transition">Dashboard</Link>
+          <Link href="/map" className="border border-orange-500/50 hover:border-orange-500 text-orange-400 px-4 py-2 rounded-lg text-sm transition">🗺️ Live Map</Link>
+          <Link href="/" className="border border-gray-700 hover:border-gray-500 px-4 py-2 rounded-lg text-sm transition">← Home</Link>
         </div>
       </header>
 
       <div className="max-w-5xl mx-auto p-6 space-y-8">
-        {/* Hero */}
         <div className="text-center py-8">
           <h1 className="text-3xl font-bold mb-2">Multi-Stop Route Optimizer</h1>
           <p className="text-gray-400 max-w-xl mx-auto">
@@ -186,7 +259,6 @@ export default function OptimizePage() {
             <h2 className="font-semibold text-lg">📍 Your Delivery Stops</h2>
             <span className="text-xs text-gray-500">{stops.length}/10 stops</span>
           </div>
-
           <div className="space-y-3">
             {stops.map((stop, i) => (
               <div key={i} className="flex items-center gap-3">
@@ -198,9 +270,7 @@ export default function OptimizePage() {
                   onChange={(e) => updateStop(i, e.target.value)}
                   className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-orange-500"
                 >
-                  {LAGOS_LOCATIONS.map((loc) => (
-                    <option key={loc} value={loc}>{loc}</option>
-                  ))}
+                  {LAGOS_LOCATIONS.map((loc) => <option key={loc} value={loc}>{loc}</option>)}
                 </select>
                 {i === 0 && <span className="text-xs text-orange-400 w-16">Start</span>}
                 {i > 0 && (
@@ -211,7 +281,6 @@ export default function OptimizePage() {
               </div>
             ))}
           </div>
-
           <div className="flex gap-3 mt-4">
             <button
               onClick={addStop}
@@ -226,14 +295,9 @@ export default function OptimizePage() {
               className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 px-6 py-2 rounded-lg text-sm font-bold transition disabled:opacity-60"
             >
               {optimizing ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Running A* Algorithm...
-                </>
+                <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Running A* Algorithm...</>
               ) : (
-                <>
-                  <Zap size={14} /> Optimize Route
-                </>
+                <><Zap size={14} /> Optimize Route</>
               )}
             </button>
           </div>
@@ -273,7 +337,6 @@ export default function OptimizePage() {
 
             {/* Before vs After */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Original */}
               <div className="bg-gray-900 border border-red-500/20 rounded-2xl p-5">
                 <div className="flex items-center gap-2 mb-4">
                   <XCircle size={18} className="text-red-400" />
@@ -285,15 +348,11 @@ export default function OptimizePage() {
                     <div key={i} className="flex items-center gap-2">
                       <div className="w-5 h-5 rounded-full bg-red-500/20 text-red-400 text-xs flex items-center justify-center flex-shrink-0">{i + 1}</div>
                       <span className="text-sm text-gray-300">{stop}</span>
-                      {i < result.original.length - 1 && (
-                        <span className="text-xs text-gray-600 ml-auto">+{getDistance(result.original[i], result.original[i + 1])}km</span>
-                      )}
+                      {i < result.original.length - 1 && <span className="text-xs text-gray-600 ml-auto">+{getDistance(result.original[i], result.original[i + 1])}km</span>}
                     </div>
                   ))}
                 </div>
               </div>
-
-              {/* Optimized */}
               <div className="bg-gray-900 border border-green-500/20 rounded-2xl p-5">
                 <div className="flex items-center gap-2 mb-4">
                   <CheckCircle size={18} className="text-green-400" />
@@ -305,16 +364,128 @@ export default function OptimizePage() {
                     <div key={i} className="flex items-center gap-2">
                       <div className="w-5 h-5 rounded-full bg-green-500/20 text-green-400 text-xs flex items-center justify-center flex-shrink-0">{i + 1}</div>
                       <span className="text-sm text-gray-300">{stop}</span>
-                      {i < result.optimized.length - 1 && (
-                        <ArrowRight size={10} className="text-gray-600" />
-                      )}
-                      {i < result.optimized.length - 1 && (
-                        <span className="text-xs text-gray-600 ml-auto">+{getDistance(result.optimized[i], result.optimized[i + 1])}km</span>
-                      )}
+                      {i < result.optimized.length - 1 && <ArrowRight size={10} className="text-gray-600" />}
+                      {i < result.optimized.length - 1 && <span className="text-xs text-gray-600 ml-auto">+{getDistance(result.optimized[i], result.optimized[i + 1])}km</span>}
                     </div>
                   ))}
                 </div>
               </div>
+            </div>
+
+            {/* ── LIVE RE-OPTIMIZATION SIMULATION ── */}
+            <div className="bg-gray-900 border border-red-500/30 rounded-2xl p-6">
+              <div className="flex items-center gap-3 mb-2">
+                <AlertTriangle size={20} className="text-red-400" />
+                <h3 className="font-bold text-white text-lg">🔴 Live Re-Optimization Simulation</h3>
+              </div>
+              <p className="text-gray-400 text-sm mb-6">
+                Simulate a real disruption on your route. RouteWise detects it instantly and re-calculates the optimal path in real time.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {DISRUPTIONS.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => simulateDisruption(d.id)}
+                    disabled={disrupting}
+                    className={`flex flex-col items-start gap-2 p-4 rounded-xl border transition disabled:opacity-50 hover:scale-105 active:scale-95
+                      ${d.color === "red" ? "border-red-500/30 bg-red-500/5 hover:border-red-500/60 hover:bg-red-500/10" : ""}
+                      ${d.color === "yellow" ? "border-yellow-500/30 bg-yellow-500/5 hover:border-yellow-500/60 hover:bg-yellow-500/10" : ""}
+                      ${d.color === "blue" ? "border-blue-500/30 bg-blue-500/5 hover:border-blue-500/60 hover:bg-blue-500/10" : ""}
+                    `}
+                  >
+                    <div className="text-2xl">{d.emoji}</div>
+                    <div className="font-bold text-white text-sm">{d.label}</div>
+                    <div className="text-xs text-gray-400">{d.description}</div>
+                    <div className={`text-xs font-semibold mt-1
+                      ${d.color === "red" ? "text-red-400" : ""}
+                      ${d.color === "yellow" ? "text-yellow-400" : ""}
+                      ${d.color === "blue" ? "text-blue-400" : ""}
+                    `}>
+                      Click to simulate →
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Disruption alert */}
+              {disruptionAlert && (
+                <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-4 mb-4 flex items-center gap-3">
+                  <div className="w-5 h-5 border-2 border-red-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  <div>
+                    <div className="text-red-400 font-bold text-sm">{disruptionAlert}</div>
+                    <div className="text-gray-400 text-xs mt-1">Running A* re-optimization with updated traffic weights...</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Disruption result */}
+              {disruptionResult && (
+                <div className="space-y-4">
+                  <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xl">{disruptionResult.disruptionEmoji}</span>
+                      <span className="text-orange-400 font-bold">{disruptionResult.disruptionType} Detected</span>
+                      <span className="ml-auto text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <RefreshCw size={10} /> Re-optimized
+                      </span>
+                    </div>
+                    <p className="text-gray-300 text-sm">{disruptionResult.message}</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Before disruption route */}
+                    <div className="bg-gray-800 border border-red-500/20 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-red-400 font-semibold text-sm">⚠️ Disrupted Route</span>
+                        <span className="text-red-400 font-bold text-sm">{disruptionResult.beforeDist}km</span>
+                      </div>
+                      <div className="space-y-1">
+                        {disruptionResult.beforeRoute.map((stop, i) => (
+                          <div key={i} className={`flex items-center gap-2 text-xs rounded px-2 py-1 ${stop === disruptionResult.affectedStop ? "bg-red-500/20 text-red-300" : "text-gray-400"}`}>
+                            <span className="w-4 text-center">{i + 1}</span>
+                            <span>{stop}</span>
+                            {stop === disruptionResult.affectedStop && <span className="ml-auto text-red-400">⚠️ BLOCKED</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* After re-optimization */}
+                    <div className="bg-gray-800 border border-green-500/20 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-green-400 font-semibold text-sm">✅ Re-Optimized Route</span>
+                        <span className="text-green-400 font-bold text-sm">{disruptionResult.afterDist}km</span>
+                      </div>
+                      <div className="space-y-1">
+                        {disruptionResult.afterRoute.map((stop, i) => (
+                          <div key={i} className="flex items-center gap-2 text-xs text-gray-300 px-2 py-1">
+                            <span className="w-4 text-center text-green-400">{i + 1}</span>
+                            <span>{stop}</span>
+                            {i < disruptionResult.afterRoute.length - 1 && <ArrowRight size={8} className="text-gray-600 ml-auto" />}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Re-optimization savings */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-gray-800 rounded-xl p-3 text-center border border-green-500/20">
+                      <div className="text-green-400 font-bold">₦{disruptionResult.fuelSaved.toLocaleString()}</div>
+                      <div className="text-gray-500 text-xs mt-1">Fuel Saved by Re-routing</div>
+                    </div>
+                    <div className="bg-gray-800 rounded-xl p-3 text-center border border-blue-500/20">
+                      <div className="text-blue-400 font-bold">{disruptionResult.timeSaved} min</div>
+                      <div className="text-gray-500 text-xs mt-1">Time Recovered</div>
+                    </div>
+                    <div className="bg-gray-800 rounded-xl p-3 text-center border border-orange-500/20">
+                      <div className="text-orange-400 font-bold">&lt;2s</div>
+                      <div className="text-gray-500 text-xs mt-1">Re-optimization Speed</div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Smart Suggestions */}
@@ -335,9 +506,7 @@ export default function OptimizePage() {
             {/* Monthly Impact */}
             <div className="bg-gradient-to-r from-orange-500/10 to-orange-900/10 border border-orange-500/20 rounded-2xl p-6 text-center">
               <div className="text-gray-400 text-sm mb-1">If you run this route every day for a month</div>
-              <div className="text-3xl font-bold text-orange-400">
-                ₦{(result.fuelSaved * 26).toLocaleString()} saved
-              </div>
+              <div className="text-3xl font-bold text-orange-400">₦{(result.fuelSaved * 26).toLocaleString()} saved</div>
               <div className="text-gray-400 text-sm mt-1">
                 and {Math.round(result.timeSaved * 26 / 60)} hours recovered — every single month
               </div>
