@@ -33,7 +33,6 @@ interface Vehicle {
   color: string;
   delivered: number;
   fuel: number;
-  // interpolated position for smooth movement
   lat: number;
   lng: number;
 }
@@ -43,13 +42,12 @@ export default function MapClient() {
   const mapRef = useRef<any>(null);
   const markerRefs = useRef<any[]>([]);
   const lineRefs = useRef<any[]>([]);
-  const [sim, setSim] = useState(true); // AUTO-START
+  const [sim, setSim] = useState(true);
   const [deliveries, setDeliveries] = useState(4);
   const [fuelSaved, setFuelSaved] = useState(860);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [mapReady, setMapReady] = useState(false);
 
-  // Init vehicles
   useEffect(() => {
     setVehicles(
       Array.from({ length: 6 }, (_, i) => {
@@ -70,38 +68,24 @@ export default function MapClient() {
     );
   }, []);
 
-  // Init map
   useEffect(() => {
     if (!mapDiv.current || mapRef.current || vehicles.length === 0) return;
     import("leaflet").then((L) => {
       if (!mapDiv.current || mapRef.current) return;
 
-      // Fix default icon paths broken by webpack
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
-        iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
-        shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-      });
-
       const m = L.map(mapDiv.current, {
         center: [6.5244, 3.3792],
-        zoom: 13, // zoomed in more to see streets
+        zoom: 13,
         zoomControl: true,
       });
 
-      // HIGH DETAIL street tile — shows every road/street in Lagos
-      L.tileLayer(
-        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        {
-          attribution: "© OpenStreetMap contributors",
-          maxZoom: 19,
-        }
-      ).addTo(m);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap contributors",
+        maxZoom: 19,
+      }).addTo(m);
 
       mapRef.current = m;
 
-      // Zone labels with orange dot markers
       ZONE_NAMES.forEach((name) => {
         const icon = L.divIcon({
           html: `<div style="display:flex;flex-direction:column;align-items:center;">
@@ -118,7 +102,6 @@ export default function MapClient() {
     });
   }, [vehicles]);
 
-  // Draw vehicle markers and route lines
   useEffect(() => {
     if (!mapRef.current || !mapReady || vehicles.length === 0) return;
     import("leaflet").then((L) => {
@@ -131,11 +114,10 @@ export default function MapClient() {
         const dst = ZONES[v.dest];
         if (!dst) return;
 
-        // Glowing vehicle dot
         const icon = L.divIcon({
           html: `<div style="position:relative;">
             <div style="background:${v.color};width:16px;height:16px;border-radius:50%;border:2px solid white;box-shadow:0 0 10px ${v.color}, 0 0 20px ${v.color}88;"></div>
-            <div style="position:absolute;top:-18px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:white;padding:1px 4px;border-radius:3px;font-size:9px;white-space:nowrap;border:1px solid ${v.color}">${v.name}</div>
+            <div style="position:absolute;top:-20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);color:white;padding:1px 5px;border-radius:3px;font-size:9px;white-space:nowrap;border:1px solid ${v.color}">${v.name}</div>
           </div>`,
           className: "",
           iconAnchor: [8, 8],
@@ -154,7 +136,6 @@ export default function MapClient() {
           `);
         markerRefs.current.push(mk);
 
-        // Dashed route line from vehicle to destination
         const ln = L.polyline([[v.lat, v.lng], dst], {
           color: v.color,
           weight: 2,
@@ -166,7 +147,6 @@ export default function MapClient() {
     });
   }, [vehicles, mapReady]);
 
-  // Simulation — smoothly interpolate vehicle positions toward destination
   useEffect(() => {
     if (!sim) return;
     const t = setInterval(() => {
@@ -175,14 +155,12 @@ export default function MapClient() {
           const dst = ZONES[v.dest];
           if (!dst) return v;
 
-          // Move 20% closer to destination each tick
           const newLat = v.lat + (dst[0] - v.lat) * 0.2;
           const newLng = v.lng + (dst[1] - v.lng) * 0.2;
 
-          // If close enough to destination, pick new destination
-          const distLat = Math.abs(dst[0] - newLat);
-          const distLng = Math.abs(dst[1] - newLng);
-          const arrived = distLat < 0.001 && distLng < 0.001;
+          const arrived =
+            Math.abs(dst[0] - newLat) < 0.001 &&
+            Math.abs(dst[1] - newLng) < 0.001;
 
           return {
             ...v,
@@ -209,7 +187,15 @@ export default function MapClient() {
       prev.map((v) => {
         const zone = pick();
         const pos = ZONES[zone];
-        return { ...v, delivered: 0, fuel: 0, zone, dest: pick(), lat: pos[0], lng: pos[1] };
+        return {
+          ...v,
+          delivered: 0,
+          fuel: 0,
+          zone,
+          dest: pick(),
+          lat: pos[0],
+          lng: pos[1],
+        };
       })
     );
   };
@@ -245,14 +231,16 @@ export default function MapClient() {
             <Play size={14} />
             {sim ? "Stop" : "▶ Start Vehicles"}
           </button>
-          <Link href="/dashboard" className="border border-gray-700 px-4 py-2 rounded-lg text-sm">
+          <Link
+            href="/dashboard"
+            className="border border-gray-700 px-4 py-2 rounded-lg text-sm"
+          >
             ← Dashboard
           </Link>
         </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Map */}
         <div className="flex-1 relative">
           {!mapReady && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-950 z-10">
@@ -266,7 +254,6 @@ export default function MapClient() {
           <div ref={mapDiv} className="w-full h-full min-h-[calc(100vh-73px)]" />
         </div>
 
-        {/* Side Panel */}
         <div className="w-72 border-l border-gray-800 bg-gray-900 p-4 flex flex-col gap-4 overflow-y-auto">
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-gray-800 rounded-xl p-3 text-center">
