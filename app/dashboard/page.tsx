@@ -4,7 +4,6 @@ import Link from "next/link";
 import {
   Truck,
   Package,
-  TrendingDown,
   Zap,
   MapPin,
   Clock,
@@ -25,7 +24,6 @@ import {
   Legend,
 } from "recharts";
 
-// ── Types ──────────────────────────────────────────────
 interface Order {
   id: string;
   pickup: string;
@@ -58,90 +56,89 @@ interface FuelData {
   spent: number;
 }
 
-// ── Lagos locations ────────────────────────────────────
 const lagosLocations = [
   "Ikeja", "Victoria Island", "Lekki", "Surulere", "Yaba",
   "Apapa", "Ikoyi", "Ajah", "Oshodi", "Mushin",
   "Agege", "Ojota", "Maryland", "Gbagada", "Isale Eko",
 ];
 
-// ── Helpers ────────────────────────────────────────────
 const randomLocation = () =>
   lagosLocations[Math.floor(Math.random() * lagosLocations.length)];
 
 const randomBetween = (min: number, max: number) =>
   Math.floor(Math.random() * (max - min + 1)) + min;
 
-// ── A* Priority-queue node ─────────────────────────────
 interface AStarNode {
   id: string;
-  g: number; // cost so far
-  h: number; // heuristic
-  f: number; // g + h
+  g: number;
+  h: number;
+  f: number;
 }
 
-// Simplified A* that scores delivery priority
 function aStarPrioritize(orders: Order[]): Order[] {
   const nodes: AStarNode[] = orders.map((o) => {
     const g = o.estimatedTime;
-    const h = (5 - o.priority) * 10; // lower priority → higher heuristic cost
+    const h = (5 - o.priority) * 10;
     return { id: o.id, g, h, f: g + h };
   });
-  // Sort by f-score ascending (best first)
   nodes.sort((a, b) => a.f - b.f);
   const idOrder = nodes.map((n) => n.id);
   return idOrder.map((id) => orders.find((o) => o.id === id)!);
 }
 
-// ── Main component ─────────────────────────────────────
+const INITIAL_METRIC_DATA: Metric[] = [
+  { time: "8:00", routewise: 22, baseline: 47 },
+  { time: "9:00", routewise: 24, baseline: 45 },
+  { time: "10:00", routewise: 21, baseline: 50 },
+  { time: "11:00", routewise: 19, baseline: 48 },
+  { time: "12:00", routewise: 26, baseline: 52 },
+  { time: "13:00", routewise: 20, baseline: 44 },
+];
+
+const INITIAL_FUEL_DATA: FuelData[] = [
+  { hour: "8:00", saved: 12, spent: 38 },
+  { hour: "9:00", saved: 15, spent: 42 },
+  { hour: "10:00", saved: 10, spent: 35 },
+  { hour: "11:00", saved: 18, spent: 40 },
+  { hour: "12:00", saved: 14, spent: 45 },
+  { hour: "13:00", saved: 20, spent: 39 },
+];
+
+const INITIAL_ORDERS: Order[] = [
+  { id: "ORD-DEMO-001", pickup: "Ikeja", delivery: "Lekki", status: "delivered", priority: 5, estimatedTime: 28, vehicle: "V1" },
+  { id: "ORD-DEMO-002", pickup: "Yaba", delivery: "Victoria Island", status: "delivered", priority: 4, estimatedTime: 22, vehicle: "V2" },
+  { id: "ORD-DEMO-003", pickup: "Surulere", delivery: "Ajah", status: "delivering", priority: 3, estimatedTime: 35, vehicle: "V3" },
+  { id: "ORD-DEMO-004", pickup: "Apapa", delivery: "Ikoyi", status: "delivering", priority: 5, estimatedTime: 18, vehicle: "V4" },
+  { id: "ORD-DEMO-005", pickup: "Mushin", delivery: "Gbagada", status: "assigned", priority: 2, estimatedTime: 30, vehicle: "V5" },
+  { id: "ORD-DEMO-006", pickup: "Ojota", delivery: "Maryland", status: "pending", priority: 4, estimatedTime: 25 },
+  { id: "ORD-DEMO-007", pickup: "Oshodi", delivery: "Agege", status: "pending", priority: 3, estimatedTime: 20 },
+];
+
+const INITIAL_VEHICLES: Vehicle[] = [
+  { id: "V1", name: "Bike 1", status: "returning", orders: 3, location: "Lekki", fuelSaved: 320, routeOptimized: true },
+  { id: "V2", name: "Bike 2", status: "active", orders: 2, location: "Victoria Island", fuelSaved: 210, routeOptimized: true },
+  { id: "V3", name: "Bike 3", status: "active", orders: 1, location: "Ajah", fuelSaved: 180, routeOptimized: true },
+  { id: "V4", name: "Bike 4", status: "active", orders: 2, location: "Ikoyi", fuelSaved: 275, routeOptimized: true },
+  { id: "V5", name: "Bike 5", status: "active", orders: 1, location: "Gbagada", fuelSaved: 145, routeOptimized: true },
+  { id: "V6", name: "Bike 6", status: "idle", orders: 0, location: "Ikeja", fuelSaved: 0, routeOptimized: false },
+];
+
 export default function Dashboard() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [simulating, setSimulating] = useState(false);
-  const [totalSaved, setTotalSaved] = useState(0);
-  const [ordersDelivered, setOrdersDelivered] = useState(0);
-  const [timeSaved, setTimeSaved] = useState(0);
-  const [metricData, setMetricData] = useState<Metric[]>([]);
-  const [fuelData, setFuelData] = useState<FuelData[]>([]);
+  const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
+  const [vehicles, setVehicles] = useState<Vehicle[]>(INITIAL_VEHICLES);
+  const [simulating, setSimulating] = useState(true);
+  const [totalSaved, setTotalSaved] = useState(1240);
+  const [ordersDelivered, setOrdersDelivered] = useState(7);
+  const [timeSaved, setTimeSaved] = useState(18);
+  const [metricData, setMetricData] = useState<Metric[]>(INITIAL_METRIC_DATA);
+  const [fuelData, setFuelData] = useState<FuelData[]>(INITIAL_FUEL_DATA);
   const [tick, setTick] = useState(0);
 
-  // initialise fleet
-  useEffect(() => {
-    setVehicles(
-      Array.from({ length: 6 }, (_, i) => ({
-        id: `V${i + 1}`,
-        name: `Bike ${i + 1}`,
-        status: "idle",
-        orders: 0,
-        location: randomLocation(),
-        fuelSaved: 0,
-        routeOptimized: false,
-      }))
-    );
-    // seed chart data
-    setMetricData(
-      Array.from({ length: 6 }, (_, i) => ({
-        time: `${8 + i}:00`,
-        routewise: randomBetween(18, 28),
-        baseline: randomBetween(38, 55),
-      }))
-    );
-    setFuelData(
-      Array.from({ length: 6 }, (_, i) => ({
-        hour: `${8 + i}:00`,
-        saved: randomBetween(8, 20),
-        spent: randomBetween(30, 50),
-      }))
-    );
-  }, []);
-
-  // simulation tick
   useEffect(() => {
     if (!simulating) return;
     const interval = setInterval(() => {
       setTick((t) => t + 1);
 
-      // add 1-3 new orders
       const newOrders: Order[] = Array.from(
         { length: randomBetween(1, 3) },
         (_, i) => ({
@@ -156,21 +153,17 @@ export default function Dashboard() {
 
       setOrders((prev) => {
         const combined = [...prev, ...newOrders];
-        // Run A* prioritization
         const prioritized = aStarPrioritize(
           combined.filter((o) => o.status === "pending")
         );
         const nonPending = combined.filter((o) => o.status !== "pending");
-        return [...nonPending, ...prioritized].slice(-30); // keep last 30
+        return [...nonPending, ...prioritized].slice(-30);
       });
 
-      // update vehicles
       setVehicles((prev) =>
         prev.map((v) => ({
           ...v,
-          status: (["active", "active", "idle", "returning"] as const)[
-            randomBetween(0, 3)
-          ],
+          status: (["active", "active", "idle", "returning"] as const)[randomBetween(0, 3)],
           orders: randomBetween(1, 4),
           location: randomLocation(),
           fuelSaved: v.fuelSaved + randomBetween(1, 5),
@@ -178,15 +171,10 @@ export default function Dashboard() {
         }))
       );
 
-      // assign pending orders to vehicles
       setOrders((prev) =>
         prev.map((o) =>
           o.status === "pending" && Math.random() > 0.4
-            ? {
-                ...o,
-                status: "assigned" as const,
-                vehicle: `V${randomBetween(1, 6)}`,
-              }
+            ? { ...o, status: "assigned" as const, vehicle: `V${randomBetween(1, 6)}` }
             : o.status === "assigned" && Math.random() > 0.5
             ? { ...o, status: "delivering" as const }
             : o.status === "delivering" && Math.random() > 0.6
@@ -195,17 +183,11 @@ export default function Dashboard() {
         )
       );
 
-      // update global metrics
-      const saved = randomBetween(50, 200);
-      setTotalSaved((s) => s + saved);
+      setTotalSaved((s) => s + randomBetween(50, 200));
       setTimeSaved((t) => t + randomBetween(2, 8));
       setOrdersDelivered((d) => d + randomBetween(0, 2));
 
-      // append chart points
-      const now = new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+      const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       setMetricData((prev) =>
         [...prev, { time: now, routewise: randomBetween(18, 30), baseline: randomBetween(38, 55) }].slice(-10)
       );
@@ -218,14 +200,14 @@ export default function Dashboard() {
 
   const resetSim = () => {
     setSimulating(false);
-    setOrders([]);
-    setTotalSaved(0);
-    setOrdersDelivered(0);
-    setTimeSaved(0);
+    setOrders(INITIAL_ORDERS);
+    setVehicles(INITIAL_VEHICLES);
+    setTotalSaved(1240);
+    setOrdersDelivered(7);
+    setTimeSaved(18);
     setTick(0);
-    setVehicles((prev) =>
-      prev.map((v) => ({ ...v, status: "idle", orders: 0, fuelSaved: 0, routeOptimized: false }))
-    );
+    setMetricData(INITIAL_METRIC_DATA);
+    setFuelData(INITIAL_FUEL_DATA);
   };
 
   const statusColor: Record<Order["status"], string> = {
@@ -243,7 +225,6 @@ export default function Dashboard() {
 
   return (
     <main className="min-h-screen bg-gray-950 text-white">
-      {/* Nav */}
       <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Truck className="text-orange-500" size={24} />
@@ -251,6 +232,11 @@ export default function Dashboard() {
           <span className="ml-3 text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full">
             Live Dashboard
           </span>
+          {simulating && (
+            <span className="ml-2 text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full animate-pulse">
+              ● LIVE
+            </span>
+          )}
         </div>
         <div className="flex gap-3">
           <button
@@ -262,9 +248,7 @@ export default function Dashboard() {
           <button
             onClick={() => setSimulating((s) => !s)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition ${
-              simulating
-                ? "bg-red-500 hover:bg-red-600"
-                : "bg-orange-500 hover:bg-orange-600"
+              simulating ? "bg-red-500 hover:bg-red-600" : "bg-orange-500 hover:bg-orange-600"
             }`}
           >
             <Play size={14} />
@@ -280,7 +264,6 @@ export default function Dashboard() {
       </header>
 
       <div className="p-6 space-y-6">
-        {/* KPI cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { icon: <DollarSign size={20} />, label: "Fuel Saved (₦)", value: `₦${totalSaved.toLocaleString()}`, color: "text-green-400" },
@@ -296,9 +279,7 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Charts row */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Delivery time comparison */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
             <h3 className="font-semibold mb-1">Delivery Time (min)</h3>
             <p className="text-xs text-gray-500 mb-4">RouteWise A* vs Baseline Greedy</p>
@@ -315,7 +296,6 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
 
-          {/* Fuel chart */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
             <h3 className="font-semibold mb-1">Fuel Usage (₦ per hour)</h3>
             <p className="text-xs text-gray-500 mb-4">Savings generated by route clustering</p>
@@ -333,9 +313,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Orders + Vehicles */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Orders */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold flex items-center gap-2">
@@ -344,11 +322,6 @@ export default function Dashboard() {
               <span className="text-xs text-gray-500">A* Prioritized</span>
             </div>
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-              {orders.length === 0 && (
-                <p className="text-gray-600 text-sm text-center py-8">
-                  Press ▶ Start Simulation to generate orders
-                </p>
-              )}
               {orders.slice().reverse().map((order) => (
                 <div key={order.id} className="bg-gray-800/60 rounded-xl p-3 flex items-center justify-between">
                   <div>
@@ -372,7 +345,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Vehicles */}
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold flex items-center gap-2">
@@ -408,7 +380,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Algorithm explainer */}
         <div className="bg-gray-900 border border-orange-500/20 rounded-2xl p-6">
           <h3 className="font-semibold text-orange-400 mb-3 flex items-center gap-2">
             <Zap size={16} /> Algorithm Transparency — How RouteWise Works
